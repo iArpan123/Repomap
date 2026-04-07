@@ -1,8 +1,10 @@
 """
-Generates a Mermaid.js diagram string that represents the repo architecture.
-Uses Claude to produce a high-quality, human-readable diagram from the analysis.
+Generates a structured JSON graph (nodes + edges) for React Flow rendering.
+Uses Claude to analyse the repo and produce architecture data.
 """
 import os
+import json
+import re
 import anthropic
 from dotenv import load_dotenv
 from .analyzer import analyze_tree, build_dependency_graph
@@ -19,10 +21,11 @@ def _build_prompt(
     dep_graph: dict[str, list[str]],
     readme: Optional[str],
 ) -> str:
-    readme_snippet = (readme or "")[:2000]
-    dep_sample = dict(list(dep_graph.items())[:40])
+    readme_snippet = (readme or "")[:3000]
+    dep_sample = dict(list(dep_graph.items())[:50])
 
-    return f"""You are an expert software architect. Analyze this GitHub repository and generate a Mermaid.js architecture diagram.
+    return f"""You are a principal software architect. Analyse this GitHub repository and produce a \
+PRECISE architecture graph in JSON format for a React Flow diagram renderer.
 
 ## Repository: {meta['full_name']}
 Description: {meta.get('description', 'N/A')}
@@ -36,25 +39,66 @@ Top directories: {analysis['top_directories']}
 Entry points: {analysis['entry_points']}
 Config files: {analysis['config_files']}
 
-## Dependency Sample (file → imports)
+## Dependency Map (file → imports)
 {dep_sample}
 
-## README excerpt
+## README
 {readme_snippet}
 
 ---
-Generate a Mermaid `graph TD` diagram that shows:
-1. The main architectural layers/components (frontend, backend, database, services, etc.)
-2. How the key directories/modules relate to each other
-3. External services or integrations (e.g., GitHub API, database, auth)
-4. Data flow direction with labeled arrows
 
-Rules:
-- Use clear, human-readable node labels (not raw file paths)
-- Group related components with subgraphs
-- Limit to 20-30 nodes max — prioritize the big picture
-- Return ONLY the raw Mermaid code block (no explanation, no markdown fences)
-- Start directly with `graph TD`
+## OUTPUT FORMAT
+
+Return a single JSON object — nothing else, no markdown fences, no prose:
+
+{{
+  "title": "short human-readable architecture title",
+  "nodes": [
+    {{
+      "id": "SCREAMING_SNAKE_CASE_ID",
+      "label": "emoji + short label",
+      "sublabel": "tech detail or framework name (optional, keep short)",
+      "layer": "one of: user | frontend | backend | database | external"
+    }}
+  ],
+  "edges": [
+    {{
+      "id": "e_SOURCE_TARGET",
+      "source": "SOURCE_ID",
+      "target": "TARGET_ID",
+      "label": "≤4 word relationship label",
+      "animated": true
+    }}
+  ]
+}}
+
+## RULES
+
+### Nodes (15–22 total)
+- Represent real architectural components, NOT file names
+- id: SCREAMING_SNAKE_CASE, no spaces, no special chars
+- label: start with a relevant emoji, e.g. "⚛️ React App", "🔐 Auth Service"
+- sublabel: framework/version/tech, e.g. "Spring Boot 3", "PostgreSQL 15"
+- layer assignment:
+  * user       → the end user, browser, mobile client
+  * frontend   → UI components, pages, state, HTTP clients, service workers
+  * backend    → API controllers, services, middleware, schedulers, jobs
+  * database   → SQL/NoSQL DBs, ORM layers, caches, file storage
+  * external   → third-party APIs, auth providers, AI services, CDNs, push services
+
+### Edges
+- Every source + target must reference an existing node id
+- animated: true for primary data flows, false for secondary
+- label: short and meaningful ("REST/JWT", "reads", "sends push", etc.)
+
+### Coverage — infer from files + README:
+- How does a user request travel through the full stack?
+- Authentication / authorization flow
+- Data persistence layer
+- Background jobs / scheduled tasks
+- External integrations (OAuth, AI, notifications, storage)
+
+Return ONLY the raw JSON object. No explanation. No markdown. No code fences.
 """
 
 
@@ -63,19 +107,20 @@ async def generate_diagram(
     files: list[dict],
     contents: dict[str, Optional[str]],
     readme: Optional[str],
-) -> str:
+) -> dict:
     analysis = analyze_tree(files)
     dep_graph = build_dependency_graph(files, contents)
     prompt = _build_prompt(meta, analysis, dep_graph, readme)
 
     message = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=2048,
+        max_tokens=4096,
         messages=[{"role": "user", "content": prompt}],
     )
-    mermaid_code = message.content[0].text.strip()
-    # Strip markdown fences if model added them anyway
-    if mermaid_code.startswith("```"):
-        lines = mermaid_code.split("\n")
-        mermaid_code = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
-    return mermaid_code
+    raw = message.content[0].text.strip()
+
+    # Strip markdown code fences if model added them
+    raw = re.sub(r"^```(?:json)?\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+
+    return json.loads(raw)

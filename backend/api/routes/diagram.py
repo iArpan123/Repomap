@@ -37,7 +37,7 @@ async def generate_repo_diagram(body: DiagramRequest):
             contents[f["path"]] = content
 
         readme = await github_service.get_readme(body.owner, body.repo)
-        mermaid = await generate_diagram(meta, files, contents, readme)
-        return {"mermaid": mermaid, "meta": meta}
+        diagram = await generate_diagram(meta, files, contents, readme)
+        return {"diagram": diagram, "meta": meta}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
