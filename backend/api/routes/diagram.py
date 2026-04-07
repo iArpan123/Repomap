@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from services import github_service
 from services.diagram_service import generate_diagram
 from services.analyzer import analyze_tree
-from services import cache
+from services import cache, embedding_service
 import asyncio
 
 router = APIRouter()
@@ -27,6 +27,17 @@ async def _get_github_data(owner: str, repo: str) -> dict:
     data   = {"meta": meta, "files": files, "readme": readme}
     cache.set("github", owner, repo, data, cache.GITHUB_TTL)
     return data
+
+
+async def _build_embeddings_bg(owner: str, repo: str, contents: dict) -> None:
+    """Fire-and-forget: build embedding index while diagram is generating."""
+    if cache.get("embeddings", owner, repo):
+        return  # already cached, nothing to do
+    try:
+        embedding_data = await embedding_service.embed_files(contents)
+        cache.set("embeddings", owner, repo, embedding_data, cache.DIAGRAM_TTL)
+    except Exception:
+        pass  # non-critical — chat route will rebuild if missing
 
 
 @router.post("/generate")
@@ -56,6 +67,12 @@ async def generate_repo_diagram(body: DiagramRequest):
         ]
         results  = await asyncio.gather(*tasks)
         contents = {f["path"]: c for f, c in zip(priority_files, results)}
+
+        # Cache contents so chat route can reuse them without re-fetching
+        cache.set("contents", body.owner, body.repo, contents, cache.GITHUB_TTL)
+
+        # Build embeddings in the background — ready before user opens chat
+        asyncio.create_task(_build_embeddings_bg(body.owner, body.repo, contents))
 
         diagram  = await generate_diagram(meta, files, contents, data["readme"])
         response = {"diagram": diagram, "meta": meta}

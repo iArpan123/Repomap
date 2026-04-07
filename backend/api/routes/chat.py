@@ -4,15 +4,15 @@ from pydantic import BaseModel
 from typing import Optional
 from services import github_service
 from services.analyzer import analyze_tree
-from services.chat_service import build_repo_context, stream_chat
-from services import cache
+from services.chat_service import build_focused_context, stream_chat
+from services import embedding_service, cache
 import asyncio
 
 router = APIRouter()
 
 
 class ChatMessage(BaseModel):
-    role: str  # "user" or "assistant"
+    role: str
     content: str
 
 
@@ -23,47 +23,73 @@ class ChatRequest(BaseModel):
     history: list[ChatMessage] = []
 
 
-async def _get_or_build_context(owner: str, repo: str) -> str:
-    # Check chat context cache first
-    ctx = cache.get("chat_ctx", owner, repo)
-    if ctx:
-        return ctx
+async def _get_github_data(owner: str, repo: str) -> dict:
+    """Re-use shared GitHub cache (populated by repo/diagram routes)."""
+    cached = cache.get("github", owner, repo)
+    if cached:
+        return cached
 
-    # Re-use shared GitHub data cache
-    github_data = cache.get("github", owner, repo)
-    if github_data:
-        meta, files, readme = github_data["meta"], github_data["files"], github_data["readme"]
-    else:
-        meta   = await github_service.get_repo_meta(owner, repo)
-        files  = await github_service.get_file_tree(owner, repo, meta["default_branch"])
-        readme = await github_service.get_readme(owner, repo)
-        cache.set("github", owner, repo, {"meta": meta, "files": files, "readme": readme}, cache.GITHUB_TTL)
+    meta   = await github_service.get_repo_meta(owner, repo)
+    files  = await github_service.get_file_tree(owner, repo, meta["default_branch"])
+    readme = await github_service.get_readme(owner, repo)
+    data   = {"meta": meta, "files": files, "readme": readme}
+    cache.set("github", owner, repo, data, cache.GITHUB_TTL)
+    return data
 
-    analysis = analyze_tree(files)
 
-    # Fetch file contents concurrently (skip test/build dirs, cap at 40)
+async def _get_file_contents(owner: str, repo: str, files: list, branch: str) -> dict:
+    """Fetch and cache file contents for the whole repo (used for embedding)."""
+    cached = cache.get("contents", owner, repo)
+    if cached:
+        return cached
+
     skip = {"test", "tests", "__pycache__", ".git", "node_modules", "dist", "build"}
-    target_files = [
+    target = [
         f for f in files
-        if not any(part in skip for part in f["path"].split("/"))
+        if not any(p in skip for p in f["path"].split("/"))
         and f.get("size", 0) < 50_000
-    ][:40]
+    ][:60]
 
-    results  = await asyncio.gather(*[
-        github_service.get_file_content(owner, repo, f["path"], meta["default_branch"])
-        for f in target_files
+    results = await asyncio.gather(*[
+        github_service.get_file_content(owner, repo, f["path"], branch)
+        for f in target
     ])
-    contents: dict[str, Optional[str]] = {f["path"]: c for f, c in zip(target_files, results)}
+    contents = {f["path"]: c for f, c in zip(target, results)}
+    cache.set("contents", owner, repo, contents, cache.GITHUB_TTL)
+    return contents
 
-    ctx = build_repo_context(meta, analysis, files, contents, readme)
-    cache.set("chat_ctx", owner, repo, ctx, cache.GITHUB_TTL)
-    return ctx
+
+async def _get_embeddings(owner: str, repo: str, contents: dict) -> dict:
+    """Embed all repo files once and cache the vectors (30 min TTL)."""
+    cached = cache.get("embeddings", owner, repo)
+    if cached:
+        return cached
+
+    embedding_data = await embedding_service.embed_files(contents)
+    cache.set("embeddings", owner, repo, embedding_data, cache.DIAGRAM_TTL)
+    return embedding_data
 
 
 @router.post("/message")
 async def chat_message(body: ChatRequest):
     try:
-        context = await _get_or_build_context(body.owner, body.repo)
+        # 1. GitHub data (shared cache)
+        github_data = await _get_github_data(body.owner, body.repo)
+        meta, files, readme = github_data["meta"], github_data["files"], github_data["readme"]
+        analysis = analyze_tree(files)
+
+        # 2. File contents (cached separately — heavier fetch)
+        contents = await _get_file_contents(body.owner, body.repo, files, meta["default_branch"])
+
+        # 3. Embedding index (built once, reused for every message)
+        embedding_data = await _get_embeddings(body.owner, body.repo, contents)
+
+        # 4. Semantic retrieval — top 8 files most relevant to THIS question
+        relevant_paths = embedding_service.retrieve(body.message, embedding_data, top_k=8)
+
+        # 5. Build a focused context (~15k chars vs the old ~60k)
+        context = build_focused_context(meta, analysis, relevant_paths, contents, readme)
+
         history = [{"role": m.role, "content": m.content} for m in body.history]
 
         async def event_stream():
@@ -71,6 +97,7 @@ async def chat_message(body: ChatRequest):
                 yield chunk
 
         return StreamingResponse(event_stream(), media_type="text/plain")
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

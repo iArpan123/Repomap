@@ -1,6 +1,7 @@
 """
 Streaming chatbot that answers questions about a repo.
-Builds a context window from: README, key file contents, file tree, and analysis.
+Uses semantic retrieval to send only the most relevant files to Claude,
+keeping the context small and responses fast.
 """
 import os
 import anthropic
@@ -11,16 +12,21 @@ load_dotenv()
 
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-MAX_CONTEXT_CHARS = 60_000  # leave room for conversation history + response
+MAX_FILE_CHARS = 1_500   # chars per file snippet
+MAX_FILES      = 8       # how many retrieved files to include
 
 
-def build_repo_context(
+def build_focused_context(
     meta: dict,
     analysis: dict,
-    files: list[dict],
+    relevant_paths: list[str],
     contents: dict[str, Optional[str]],
     readme: Optional[str],
 ) -> str:
+    """
+    Build a compact context from semantically relevant files only.
+    Always includes repo metadata + file tree summary + README snippet.
+    """
     parts: list[str] = []
 
     parts.append(f"# Repository: {meta['full_name']}")
@@ -29,33 +35,27 @@ def build_repo_context(
     parts.append(f"Topics: {', '.join(meta.get('topics', []))}\n")
 
     if readme:
-        parts.append("## README\n" + readme[:3000])
+        parts.append("## README\n" + readme[:2000])
 
-    parts.append(f"\n## File Tree ({analysis['total_files']} files)")
+    parts.append(f"\n## File Tree Summary")
     parts.append("Languages: " + str(analysis["languages"]))
     parts.append("Directories: " + str(analysis["top_directories"]))
     parts.append("Entry points: " + str(analysis["entry_points"]))
     parts.append("Config files: " + str(analysis["config_files"]))
 
-    parts.append("\n## Key File Contents")
-    budget = MAX_CONTEXT_CHARS - sum(len(p) for p in parts)
-    for f in files:
-        path = f["path"]
+    parts.append(f"\n## Most Relevant Files (retrieved for this query)")
+    for path in relevant_paths[:MAX_FILES]:
         content = contents.get(path)
-        if not content:
-            continue
-        snippet = f"\n### {path}\n```\n{content[:1500]}\n```"
-        if budget - len(snippet) < 500:
-            break
-        parts.append(snippet)
-        budget -= len(snippet)
+        if content:
+            parts.append(f"\n### {path}\n```\n{content[:MAX_FILE_CHARS]}\n```")
 
     return "\n".join(parts)
 
 
 SYSTEM_PROMPT = """\
 You are an expert software engineer and technical onboarding assistant.
-You have been given full context about a GitHub repository.
+You have been given context about a GitHub repository, including the most relevant
+files for the current question (retrieved via semantic search).
 Your job is to help new engineers understand the codebase quickly.
 Answer questions clearly and concisely. Reference specific files, \
 directories, or functions when relevant. If you don't know something, say so.\
