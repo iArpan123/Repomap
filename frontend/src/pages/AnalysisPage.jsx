@@ -43,24 +43,34 @@ export default function AnalysisPage() {
   const fetchDiagram = useCallback(async () => {
     setDiagramLoading(true);
     setDiagramError("");
-    try {
-      const r = await fetch("/api/diagram/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ owner, repo }),
-      });
-      if (!r.ok) throw new Error((await r.json()).detail);
-      const data = await r.json();
-      setDiagramMeta(data.meta);
-      const { nodes, edges } = toFlowFormat(data.diagram);
-      setDiagramNodeCount(data.diagram.nodes.length);
-      setDiagramNodes(nodes);
-      setDiagramEdges(edges);
-    } catch (err) {
-      setDiagramError(String(err));
-    } finally {
-      setDiagramLoading(false);
+
+    let lastError;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      // On retry, give the backend a moment to finish warming up
+      if (attempt > 0) await new Promise(r => setTimeout(r, 1500));
+      try {
+        const r = await fetch("/api/diagram/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ owner, repo }),
+        });
+        if (!r.ok) throw new Error((await r.json()).detail);
+        const data = await r.json();
+        setDiagramMeta(data.meta);
+        const { nodes, edges } = toFlowFormat(data.diagram);
+        setDiagramNodeCount(data.diagram.nodes.length);
+        setDiagramNodes(nodes);
+        setDiagramEdges(edges);
+        setDiagramLoading(false);
+        return; // success — exit
+      } catch (err) {
+        lastError = err;
+      }
     }
+
+    // Both attempts failed
+    setDiagramError(String(lastError));
+    setDiagramLoading(false);
   }, [owner, repo]);
 
   // Auto-start diagram fetch once (regardless of active tab)

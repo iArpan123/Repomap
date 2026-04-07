@@ -3,8 +3,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 from services import github_service
-from services.analyzer import analyze_tree, build_dependency_graph
+from services.analyzer import analyze_tree
 from services.chat_service import build_repo_context, stream_chat
+from services import cache
 import asyncio
 
 router = APIRouter()
@@ -22,34 +23,41 @@ class ChatRequest(BaseModel):
     history: list[ChatMessage] = []
 
 
-# In-memory context cache keyed by "owner/repo"
-_context_cache: dict[str, str] = {}
-
-
 async def _get_or_build_context(owner: str, repo: str) -> str:
-    key = f"{owner}/{repo}"
-    if key in _context_cache:
-        return _context_cache[key]
+    # Check chat context cache first
+    ctx = cache.get("chat_ctx", owner, repo)
+    if ctx:
+        return ctx
 
-    meta = await github_service.get_repo_meta(owner, repo)
-    files = await github_service.get_file_tree(owner, repo, meta["default_branch"])
+    # Re-use shared GitHub data cache
+    github_data = cache.get("github", owner, repo)
+    if github_data:
+        meta, files, readme = github_data["meta"], github_data["files"], github_data["readme"]
+    else:
+        meta   = await github_service.get_repo_meta(owner, repo)
+        files  = await github_service.get_file_tree(owner, repo, meta["default_branch"])
+        readme = await github_service.get_readme(owner, repo)
+        cache.set("github", owner, repo, {"meta": meta, "files": files, "readme": readme}, cache.GITHUB_TTL)
+
     analysis = analyze_tree(files)
 
-    # Fetch file contents concurrently (cap at 80 files, skip large ones)
-    target_files = [f for f in files if f.get("size", 0) < 50_000][:80]
-    tasks = [
+    # Fetch file contents concurrently (skip test/build dirs, cap at 40)
+    skip = {"test", "tests", "__pycache__", ".git", "node_modules", "dist", "build"}
+    target_files = [
+        f for f in files
+        if not any(part in skip for part in f["path"].split("/"))
+        and f.get("size", 0) < 50_000
+    ][:40]
+
+    results  = await asyncio.gather(*[
         github_service.get_file_content(owner, repo, f["path"], meta["default_branch"])
         for f in target_files
-    ]
-    results = await asyncio.gather(*tasks)
-    contents: dict[str, Optional[str]] = {
-        f["path"]: content for f, content in zip(target_files, results)
-    }
+    ])
+    contents: dict[str, Optional[str]] = {f["path"]: c for f, c in zip(target_files, results)}
 
-    readme = await github_service.get_readme(owner, repo)
-    context = build_repo_context(meta, analysis, files, contents, readme)
-    _context_cache[key] = context
-    return context
+    ctx = build_repo_context(meta, analysis, files, contents, readme)
+    cache.set("chat_ctx", owner, repo, ctx, cache.GITHUB_TTL)
+    return ctx
 
 
 @router.post("/message")
@@ -69,6 +77,5 @@ async def chat_message(body: ChatRequest):
 
 @router.delete("/context/{owner}/{repo}")
 async def clear_context(owner: str, repo: str):
-    key = f"{owner}/{repo}"
-    _context_cache.pop(key, None)
-    return {"cleared": key}
+    cache.delete_all(owner, repo)
+    return {"cleared": f"{owner}/{repo}"}

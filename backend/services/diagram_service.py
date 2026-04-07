@@ -12,7 +12,7 @@ from typing import Optional
 
 load_dotenv()
 
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 
 def _build_prompt(
@@ -112,7 +112,7 @@ async def generate_diagram(
     dep_graph = build_dependency_graph(files, contents)
     prompt = _build_prompt(meta, analysis, dep_graph, readme)
 
-    message = client.messages.create(
+    message = await client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=4096,
         messages=[{"role": "user", "content": prompt}],

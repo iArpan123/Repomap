@@ -74,16 +74,26 @@ export function toFlowFormat(diagramData) {
 
   const nodes = tierLayout(rawNodes);
 
+  // Build a layer lookup so we can detect same-tier edges
+  const layerOf = Object.fromEntries(diagramData.nodes.map(n => [n.id, n.layer ?? "backend"]));
+
   const edges = diagramData.edges
     .filter(e => valid.has(e.source) && valid.has(e.target))
     .map((e, i) => {
-      const srcLayer = diagramData.nodes.find(n => n.id === e.source)?.layer ?? "backend";
+      const srcLayer = layerOf[e.source];
+      const tgtLayer = layerOf[e.target];
+      const sameTier = srcLayer === tgtLayer;
       const color    = LAYER[srcLayer]?.border ?? "#475569";
+
+      // Same-tier edges route horizontally through the node row — labels would
+      // appear hidden behind sibling nodes. Suppress them to keep the diagram clean.
+      const label = sameTier ? "" : (e.label ?? "");
+
       return {
         id: e.id ?? `e_${e.source}_${e.target}_${i}`,
         source: e.source,
         target: e.target,
-        label: e.label ?? "",
+        label,
         animated: e.animated ?? false,
         type: "smoothstep",
         style: { stroke: color + "bb", strokeWidth: 1.8 },
