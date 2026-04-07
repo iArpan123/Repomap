@@ -74,33 +74,28 @@ export function toFlowFormat(diagramData) {
 
   const nodes = tierLayout(rawNodes);
 
-  // Build a layer lookup so we can detect same-tier edges
-  const layerOf = Object.fromEntries(diagramData.nodes.map(n => [n.id, n.layer ?? "backend"]));
-
   const edges = diagramData.edges
     .filter(e => valid.has(e.source) && valid.has(e.target))
     .map((e, i) => {
-      const srcLayer = layerOf[e.source];
-      const tgtLayer = layerOf[e.target];
-      const sameTier = srcLayer === tgtLayer;
-      const color    = LAYER[srcLayer]?.border ?? "#475569";
+      const srcLayer = diagramData.nodes.find(n => n.id === e.source)?.layer ?? "backend";
+      const isPrimary = e.animated ?? false;
+      const color     = LAYER[srcLayer]?.border ?? "#475569";
 
-      // Same-tier edges route horizontally through the node row — labels would
-      // appear hidden behind sibling nodes. Suppress them to keep the diagram clean.
-      const label = sameTier ? "" : (e.label ?? "");
+      // Primary (animated) flows: brighter + slightly thicker to stand out.
+      // Secondary flows: dimmer to reduce visual noise from overlapping lines.
+      const opacity   = isPrimary ? "dd" : "55";
+      const width     = isPrimary ? 2.2 : 1.4;
 
       return {
         id: e.id ?? `e_${e.source}_${e.target}_${i}`,
         source: e.source,
         target: e.target,
-        label,
-        animated: e.animated ?? false,
+        // No labels — they bunch up and overlap along shared paths.
+        // Layer position + arrows convey the architecture clearly.
+        animated: isPrimary,
         type: "smoothstep",
-        style: { stroke: color + "bb", strokeWidth: 1.8 },
-        labelStyle: { fill: "#94a3b8", fontSize: 10, fontFamily: "ui-monospace,monospace", fontWeight: 600 },
-        labelBgStyle: { fill: "#0d1117", fillOpacity: .9, rx: 5, ry: 5 },
-        labelBgPadding: [3, 7],
-        markerEnd: { type: MarkerType.ArrowClosed, color: color + "bb", width: 13, height: 13 },
+        style: { stroke: color + opacity, strokeWidth: width },
+        markerEnd: { type: MarkerType.ArrowClosed, color: color + opacity, width: 13, height: 13 },
       };
     });
 
