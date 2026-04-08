@@ -6,7 +6,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": "https://repomap-6kwz.onrender.com",
+      "/api": "http://localhost:8000",
     },
   },
 });
