@@ -8,9 +8,9 @@ export default function App() {
   return (
     <AuthProvider>
       <Routes>
-        <Route path="/"                       element={<HomePage />} />
-        <Route path="/repos"                  element={<RepoBrowserPage />} />
-        <Route path="/repo/:owner/:repo"      element={<AnalysisPage />} />
+        <Route path="/"                  element={<HomePage />} />
+        <Route path="/repos"             element={<RepoBrowserPage />} />
+        <Route path="/repo/:owner/:repo" element={<AnalysisPage />} />
       </Routes>
     </AuthProvider>
   );

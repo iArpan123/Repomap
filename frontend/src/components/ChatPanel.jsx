@@ -12,8 +12,8 @@ const SUGGESTED = [
 ];
 
 export default function ChatPanel({ owner, repo, token }) {
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
+  const [messages, setMessages]   = useState([]);
+  const [input, setInput]         = useState("");
   const [streaming, setStreaming] = useState(false);
   const bottomRef = useRef(null);
 
@@ -24,32 +24,23 @@ export default function ChatPanel({ owner, repo, token }) {
   async function sendMessage(text) {
     const userMsg = { role: "user", content: text };
     const history = [...messages, userMsg];
-    setMessages(history);
+    setMessages([...history, { role: "assistant", content: "" }]);
     setInput("");
     setStreaming(true);
-
-    // Add placeholder assistant message
-    const assistantMsg = { role: "assistant", content: "" };
-    setMessages([...history, assistantMsg]);
 
     try {
       const r = await fetch("/api/chat/message", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...(token && { Authorization: `Bearer ${token}` }) },
-        body: JSON.stringify({
-          owner,
-          repo,
-          message: text,
-          history: messages, // history before current user message
-        }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(token && { Authorization: `Bearer ${token}` }),
+        },
+        body: JSON.stringify({ owner, repo, message: text, history: messages }),
       });
 
-      if (!r.ok) {
-        const e = await r.json();
-        throw new Error(e.detail);
-      }
+      if (!r.ok) throw new Error((await r.json()).detail);
 
-      const reader = r.body.getReader();
+      const reader  = r.body.getReader();
       const decoder = new TextDecoder();
       let full = "";
 
@@ -57,20 +48,17 @@ export default function ChatPanel({ owner, repo, token }) {
         const { done, value } = await reader.read();
         if (done) break;
         full += decoder.decode(value, { stream: true });
-        setMessages((prev) => {
-          const updated = [...prev];
-          updated[updated.length - 1] = { role: "assistant", content: full };
-          return updated;
+        setMessages(prev => {
+          const u = [...prev];
+          u[u.length - 1] = { role: "assistant", content: full };
+          return u;
         });
       }
     } catch (e) {
-      setMessages((prev) => {
-        const updated = [...prev];
-        updated[updated.length - 1] = {
-          role: "assistant",
-          content: `Error: ${e.message}`,
-        };
-        return updated;
+      setMessages(prev => {
+        const u = [...prev];
+        u[u.length - 1] = { role: "assistant", content: `Error: ${e.message}` };
+        return u;
       });
     } finally {
       setStreaming(false);
@@ -85,28 +73,32 @@ export default function ChatPanel({ owner, repo, token }) {
 
   function clearChat() {
     setMessages([]);
-    // Also clear server-side context cache so next message rebuilds it
     fetch(`/api/chat/context/${owner}/${repo}`, { method: "DELETE" });
   }
 
   return (
-    <div className="h-full flex flex-col" style={{ maxHeight: "calc(100vh - 200px)" }}>
+    <div style={{
+      height: "100%", display: "flex", flexDirection: "column",
+      background: "var(--bg)", maxHeight: "calc(100vh - 200px)",
+    }}>
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+
         {messages.length === 0 && (
-          <div className="pt-6">
-            <p className="text-gray-500 text-sm text-center mb-6">
+          <div style={{ paddingTop: 24, display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <p style={{ color: "var(--text4)", fontSize: 13, marginBottom: 20, textAlign: "center" }}>
               Ask anything about{" "}
-              <span className="text-brand-400 font-mono">
-                {owner}/{repo}
-              </span>
+              <span style={{ color: "var(--text2)", fontFamily: "monospace" }}>{owner}/{repo}</span>
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-xl mx-auto">
-              {SUGGESTED.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => sendMessage(s)}
-                  className="text-left text-xs text-gray-400 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg px-3 py-2 transition-colors leading-relaxed"
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, maxWidth: 560, width: "100%" }}>
+              {SUGGESTED.map(s => (
+                <button key={s} onClick={() => sendMessage(s)} style={{
+                  textAlign: "left", fontSize: 12, color: "var(--text3)",
+                  background: "var(--surface)", border: "1px solid var(--border)",
+                  borderRadius: 8, padding: "10px 12px", cursor: "pointer", lineHeight: 1.5,
+                }}
+                  onMouseEnter={e => { e.currentTarget.style.background="var(--surface2)"; e.currentTarget.style.borderColor="var(--border2)"; e.currentTarget.style.color="var(--text)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background="var(--surface)"; e.currentTarget.style.borderColor="var(--border)"; e.currentTarget.style.color="var(--text3)"; }}
                 >
                   {s}
                 </button>
@@ -116,36 +108,48 @@ export default function ChatPanel({ owner, repo, token }) {
         )}
 
         {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-          >
+          <div key={i} style={{
+            display: "flex", gap: 10,
+            justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
+            alignItems: "flex-start",
+          }}>
             {msg.role === "assistant" && (
-              <div className="w-7 h-7 rounded-full bg-brand-600 flex items-center justify-center flex-shrink-0 mt-0.5">
-                <Bot className="w-4 h-4" />
+              <div style={{
+                width: 26, height: 26, borderRadius: "50%",
+                background: "var(--surface2)", border: "1px solid var(--border2)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                flexShrink: 0, marginTop: 2,
+              }}>
+                <Bot size={13} color="var(--text2)" />
               </div>
             )}
-            <div
-              className={`max-w-2xl rounded-2xl px-4 py-3 text-sm ${
-                msg.role === "user"
-                  ? "bg-brand-600 text-white rounded-tr-sm"
-                  : "bg-gray-800 text-gray-100 rounded-tl-sm"
-              }`}
-            >
-              {msg.role === "assistant" ? (
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  className="prose prose-invert prose-sm max-w-none"
-                >
-                  {msg.content || "▍"}
-                </ReactMarkdown>
-              ) : (
-                msg.content
-              )}
+            <div style={{
+              maxWidth: 580, borderRadius: 12, padding: "10px 14px",
+              fontSize: 13, lineHeight: 1.65,
+              ...(msg.role === "user"
+                ? {
+                    background: "var(--text)", color: "var(--bg)",
+                    borderTopRightRadius: 4,
+                  }
+                : {
+                    background: "var(--surface)", border: "1px solid var(--border)",
+                    color: "var(--text2)", borderTopLeftRadius: 4,
+                  }
+              ),
+            }}>
+              {msg.role === "assistant"
+                ? <ReactMarkdown remarkPlugins={[remarkGfm]} className="prose prose-invert prose-sm max-w-none">{msg.content || "▍"}</ReactMarkdown>
+                : msg.content
+              }
             </div>
             {msg.role === "user" && (
-              <div className="w-7 h-7 rounded-full bg-gray-700 flex items-center justify-center flex-shrink-0 mt-0.5">
-                <User className="w-4 h-4" />
+              <div style={{
+                width: 26, height: 26, borderRadius: "50%",
+                background: "var(--text)", display: "flex",
+                alignItems: "center", justifyContent: "center",
+                flexShrink: 0, marginTop: 2,
+              }}>
+                <User size={13} color="var(--bg)" />
               </div>
             )}
           </div>
@@ -154,37 +158,45 @@ export default function ChatPanel({ owner, repo, token }) {
       </div>
 
       {/* Input */}
-      <div className="border-t border-gray-800 p-3">
-        <form onSubmit={handleSubmit} className="flex gap-2 items-end">
+      <div style={{ borderTop: "1px solid var(--border)", padding: "12px 16px", background: "var(--bg)" }}>
+        <form onSubmit={handleSubmit} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
           <textarea
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSubmit(e);
-              }
-            }}
-            placeholder="Ask about the codebase… (Enter to send, Shift+Enter for newline)"
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(e); } }}
+            placeholder="Ask about the codebase… (Enter to send)"
             rows={2}
-            className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-sm resize-none focus:outline-none focus:border-brand-500 placeholder-gray-600"
+            style={{
+              flex: 1, background: "var(--surface)", border: "1px solid var(--border2)",
+              borderRadius: 10, padding: "10px 14px", color: "var(--text)",
+              fontSize: 13, resize: "none", outline: "none",
+              fontFamily: "inherit", lineHeight: 1.5,
+            }}
+            onFocus={e => e.target.style.borderColor = "var(--text3)"}
+            onBlur={e => e.target.style.borderColor = "var(--border2)"}
           />
-          <div className="flex flex-col gap-1">
-            <button
-              type="submit"
-              disabled={streaming || !input.trim()}
-              className="bg-brand-500 hover:bg-brand-600 disabled:opacity-40 text-white p-2.5 rounded-xl transition-colors"
-            >
-              <Send className="w-4 h-4" />
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <button type="submit" disabled={streaming || !input.trim()} style={{
+              background: streaming || !input.trim() ? "var(--surface)" : "var(--text)",
+              color: streaming || !input.trim() ? "var(--text4)" : "var(--bg)",
+              border: "1px solid var(--border2)", borderRadius: 10,
+              padding: 10, cursor: streaming || !input.trim() ? "not-allowed" : "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <Send size={15} />
             </button>
             {messages.length > 0 && (
-              <button
-                type="button"
-                onClick={clearChat}
-                className="text-gray-600 hover:text-gray-400 p-2.5 rounded-xl transition-colors"
+              <button type="button" onClick={clearChat} style={{
+                background: "transparent", border: "1px solid var(--border)",
+                borderRadius: 10, padding: 10, cursor: "pointer",
+                color: "var(--text5)", display: "flex",
+                alignItems: "center", justifyContent: "center",
+              }}
+                onMouseEnter={e => e.currentTarget.style.color = "var(--text2)"}
+                onMouseLeave={e => e.currentTarget.style.color = "var(--text5)"}
                 title="Clear chat"
               >
-                <Trash2 className="w-4 h-4" />
+                <Trash2 size={15} />
               </button>
             )}
           </div>
