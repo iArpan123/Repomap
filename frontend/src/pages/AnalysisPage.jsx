@@ -1,12 +1,83 @@
-import { useEffect, useState, useCallback } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import DiagramPanel, { toFlowFormat } from "../components/DiagramPanel";
 import ChatPanel from "../components/ChatPanel";
 import RepoHeader from "../components/RepoHeader";
-import { Map, ArrowLeft, Loader2 } from "lucide-react";
+import { Map, ArrowLeft, Loader2, LogOut, RefreshCw, ChevronDown } from "lucide-react";
+import { useAuth } from "../context/AuthContext";
+
+function UserMenu() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  // Close on outside click
+  useEffect(() => {
+    function handle(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, []);
+
+  if (!user) {
+    return (
+      <a href="/api/auth/login" style={{
+        fontSize: 12, color: "#38bdf8", border: "1px solid #1e40af",
+        borderRadius: 6, padding: "4px 10px", textDecoration: "none",
+      }}>
+        Sign in with GitHub
+      </a>
+    );
+  }
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button onClick={() => setOpen(o => !o)} style={{
+        display: "flex", alignItems: "center", gap: 6,
+        background: "transparent", border: "1px solid #1e293b",
+        borderRadius: 8, padding: "4px 8px", cursor: "pointer", color: "#e2e8f0",
+      }}>
+        <img src={user.avatar_url} alt={user.login}
+          style={{ width: 22, height: 22, borderRadius: "50%" }} />
+        <span style={{ fontSize: 12, color: "#94a3b8" }}>@{user.login}</span>
+        <ChevronDown size={12} color="#64748b" />
+      </button>
+
+      {open && (
+        <div style={{
+          position: "absolute", right: 0, top: "calc(100% + 6px)",
+          background: "#0d1117", border: "1px solid #1e293b",
+          borderRadius: 8, minWidth: 190, zIndex: 100,
+          boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+          overflow: "hidden",
+        }}>
+          <button onClick={() => { navigate("/repos"); setOpen(false); }} style={menuItem}>
+            <Map size={13} /> Your repositories
+          </button>
+          <button onClick={() => { logout(); navigate("/"); }} style={menuItem}>
+            <LogOut size={13} /> Sign out
+          </button>
+          <div style={{ borderTop: "1px solid #1e293b" }} />
+          {/* Forces GitHub to show login screen fresh so user can switch account */}
+          <a href="https://github.com/logout" target="_blank" rel="noreferrer"
+            onClick={() => { logout(); }} style={{ ...menuItem, textDecoration: "none" }}>
+            <RefreshCw size={13} /> Switch GitHub account
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const menuItem = {
+  display: "flex", alignItems: "center", gap: 8, width: "100%",
+  padding: "9px 14px", background: "transparent", border: "none",
+  color: "#94a3b8", fontSize: 12, cursor: "pointer", textAlign: "left",
+};
 
 export default function AnalysisPage() {
   const { owner, repo } = useParams();
+  const { activeToken: token } = useAuth();
 
   // ── repo metadata ─────────────────────────────────────────
   const [repoData, setRepoData]     = useState(null);
@@ -30,7 +101,7 @@ export default function AnalysisPage() {
     setRepoError("");
     fetch("/api/repo/analyze", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(token && { Authorization: `Bearer ${token}` }) },
       body: JSON.stringify({ owner, repo }),
     })
       .then(r => { if (!r.ok) return r.json().then(e => Promise.reject(e.detail)); return r.json(); })
@@ -51,7 +122,7 @@ export default function AnalysisPage() {
       try {
         const r = await fetch("/api/diagram/generate", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...(token && { Authorization: `Bearer ${token}` }) },
           body: JSON.stringify({ owner, repo }),
         });
         if (!r.ok) throw new Error((await r.json()).detail);
@@ -101,6 +172,9 @@ export default function AnalysisPage() {
         >
           {owner}/{repo}
         </a>
+        <div style={{ marginLeft: "auto" }}>
+          <UserMenu />
+        </div>
       </header>
 
       {loadingRepo && (
@@ -158,7 +232,7 @@ export default function AnalysisPage() {
               />
             </div>
             <div style={{ display: activeTab === "chat" ? "block" : "none", height: "100%" }}>
-              <ChatPanel owner={owner} repo={repo} />
+              <ChatPanel owner={owner} repo={repo} token={token} />
             </div>
           </div>
         </div>

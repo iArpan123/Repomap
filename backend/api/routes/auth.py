@@ -34,7 +34,7 @@ def github_login():
     url = (
         f"{GITHUB_AUTHORIZE}"
         f"?client_id={CLIENT_ID}"
-        f"&scope=read:user,public_repo"
+        f"&scope=read:user,repo"
     )
     return RedirectResponse(url)
 
@@ -95,7 +95,7 @@ async def get_user_repos(request: Request):
             r = await client.get(
                 f"{GITHUB_API}/user/repos",
                 params={
-                    "visibility":  "public",
+                    "visibility":  "all",       # public + private
                     "affiliation": "owner",
                     "sort":        "pushed",
                     "per_page":    100,
@@ -124,6 +124,7 @@ async def get_user_repos(request: Request):
             "updated_at":  r["pushed_at"],
             "html_url":    r["html_url"],
             "owner":       r["owner"]["login"],
+            "private":     r["private"],
         }
         for r in repos
     ]

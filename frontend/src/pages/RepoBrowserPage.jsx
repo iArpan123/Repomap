@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { GitBranch, Star, GitFork, LogOut, Map, Search, ExternalLink } from "lucide-react";
+import { GitBranch, Star, GitFork, LogOut, Map, Search, ExternalLink, Lock } from "lucide-react";
 
 const LANG_COLORS = {
   JavaScript: "#f1e05a", TypeScript: "#3178c6", Python: "#3572A5",
@@ -90,9 +90,9 @@ export default function RepoBrowserPage() {
         </div>
 
         {user && (
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <img src={user.avatar_url} alt={user.login}
-              style={{ width: 30, height: 30, borderRadius: "50%", border: "2px solid #1e293b" }} />
+              style={{ width: 28, height: 28, borderRadius: "50%", border: "2px solid #1e293b" }} />
             <span style={{ fontSize: 13, color: "#94a3b8" }}>@{user.login}</span>
             <button onClick={() => { logout(); navigate("/"); }} style={{
               display: "flex", alignItems: "center", gap: 6,
@@ -102,6 +102,16 @@ export default function RepoBrowserPage() {
             }}>
               <LogOut size={12} /> Sign out
             </button>
+            <a href="https://github.com/logout" target="_blank" rel="noreferrer"
+              onClick={() => logout()}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                background: "transparent", border: "1px solid #334155",
+                borderRadius: 6, padding: "5px 10px", color: "#94a3b8",
+                cursor: "pointer", fontSize: 12, textDecoration: "none",
+              }}>
+              <LogOut size={12} /> Switch account
+            </a>
           </div>
         )}
       </nav>
@@ -171,6 +181,7 @@ export default function RepoBrowserPage() {
                     <span style={{ fontWeight: 600, fontSize: 14, color: "#38bdf8" }}>
                       {repo.name}
                     </span>
+                    {repo.private && <Lock size={11} color="#94a3b8" />}
                   </div>
                   <a
                     href={repo.html_url} target="_blank" rel="noopener noreferrer"

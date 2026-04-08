@@ -11,7 +11,7 @@ const SUGGESTED = [
   "Where should I look to add a new API endpoint?",
 ];
 
-export default function ChatPanel({ owner, repo }) {
+export default function ChatPanel({ owner, repo, token }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -35,7 +35,7 @@ export default function ChatPanel({ owner, repo }) {
     try {
       const r = await fetch("/api/chat/message", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(token && { Authorization: `Bearer ${token}` }) },
         body: JSON.stringify({
           owner,
           repo,
