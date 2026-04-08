@@ -188,7 +188,7 @@ export default function AnalysisPage() {
     : "Architecture Diagram";
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="h-screen flex flex-col">
       {/* Top bar */}
       <header style={{
         borderBottom: "1px solid #111", background: "#000",
