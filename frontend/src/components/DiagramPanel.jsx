@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import {
   ReactFlow, ReactFlowProvider,
   Background, Controls, MiniMap,
@@ -7,6 +7,7 @@ import {
   Panel,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { toPng } from "html-to-image";
 import { nodeTypes, LAYER, TIER_LABEL } from "./diagram/CustomNodes";
 import { RefreshCw, Download, AlertCircle, Layers } from "lucide-react";
 
@@ -135,6 +136,7 @@ function DiagramInner({ nodes: propNodes, edges: propEdges, meta, nodeCount, loa
   const { fitView }                            = useReactFlow();
   const [nodes, setLocalNodes, onNodesChange]  = useNodesState([]);
   const [edges, setLocalEdges, onEdgesChange]  = useEdgesState([]);
+  const canvasRef = useRef(null);
 
   useEffect(() => { setLocalNodes(propNodes); }, [propNodes]);  // eslint-disable-line
   useEffect(() => { setLocalEdges(propEdges); }, [propEdges]);  // eslint-disable-line
@@ -150,19 +152,20 @@ function DiagramInner({ nodes: propNodes, edges: propEdges, meta, nodeCount, loa
     return () => clearTimeout(t);
   }, [propNodes.length, doFit]);
 
-  function exportSvg() {
-    const svg = document.querySelector(".react-flow__renderer svg");
-    if (!svg) return;
-    const a = Object.assign(document.createElement("a"), {
-      href: URL.createObjectURL(new Blob([svg.outerHTML], { type: "image/svg+xml" })),
-      download: `${meta?.full_name?.replace("/", "-") ?? "repo"}-architecture.svg`,
-    });
-    a.click();
-    URL.revokeObjectURL(a.href);
+  function exportPng() {
+    if (!canvasRef.current) return;
+    toPng(canvasRef.current, { backgroundColor: "#080b10", pixelRatio: 2 })
+      .then(dataUrl => {
+        const a = Object.assign(document.createElement("a"), {
+          href: dataUrl,
+          download: `${meta?.full_name?.replace("/", "-") ?? "repo"}-architecture.png`,
+        });
+        a.click();
+      });
   }
 
   return (
-    <div style={{ width: "100%", height: "100%", position: "relative" }}>
+    <div ref={canvasRef} style={{ width: "100%", height: "100%", position: "relative" }}>
 
       {/* Loading overlay */}
       {loading && (
@@ -250,8 +253,8 @@ function DiagramInner({ nodes: propNodes, edges: propEdges, meta, nodeCount, loa
               onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
               <RefreshCw size={12} /> Regenerate
             </button>
-            <button onClick={exportSvg} style={btnBase} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
-              <Download size={12} /> Export SVG
+            <button onClick={exportPng} style={btnBase} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
+              <Download size={12} /> Export PNG
             </button>
           </div>
         </Panel>

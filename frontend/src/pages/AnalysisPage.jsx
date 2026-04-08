@@ -4,7 +4,7 @@ import DiagramPanel, { toFlowFormat } from "../components/DiagramPanel";
 import ChatPanel from "../components/ChatPanel";
 import CommitTimeline from "../components/CommitTimeline";
 import RepoHeader from "../components/RepoHeader";
-import { Map, ArrowLeft, Loader2, LogOut, RefreshCw, ChevronDown } from "lucide-react";
+import { Map, ArrowLeft, Loader2, LogOut, RefreshCw, ChevronDown, Link2, Check } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
 function UserMenu() {
@@ -99,6 +99,14 @@ export default function AnalysisPage() {
 
   // ── active tab ────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState("diagram");
+
+  // ── share link ────────────────────────────────────────────
+  const [copied, setCopied] = useState(false);
+  function copyShareLink() {
+    navigator.clipboard.writeText(window.location.href);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   // ── fetch repo metadata ───────────────────────────────────
   useEffect(() => {
@@ -212,7 +220,23 @@ export default function AnalysisPage() {
         >
           {owner}/{repo}
         </a>
-        <div style={{ marginLeft: "auto" }}>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            onClick={copyShareLink}
+            title="Copy shareable link"
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              background: "transparent", border: "1px solid #1e293b",
+              borderRadius: 8, padding: "5px 11px", cursor: "pointer",
+              fontSize: 12, color: copied ? "#4ade80" : "#64748b",
+              transition: "color .15s, border-color .15s",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = "#334155"; e.currentTarget.style.color = copied ? "#4ade80" : "#e2e8f0"; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = "#1e293b"; e.currentTarget.style.color = copied ? "#4ade80" : "#64748b"; }}
+          >
+            {copied ? <Check size={12} /> : <Link2 size={12} />}
+            {copied ? "Copied!" : "Share"}
+          </button>
           <UserMenu />
         </div>
       </header>
