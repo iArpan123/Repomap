@@ -1,80 +1,78 @@
 """
-Semantic file retrieval using local embeddings (fastembed, no extra API key).
-
-Flow:
-  1. On first chat — embed all repo files once, cache the vectors.
-  2. On each message — embed the user query, cosine-similarity search,
-     return the top-k most relevant file paths.
-
-Model: BAAI/bge-small-en-v1.5 (~33 MB, downloaded once, runs on CPU in <1s).
+Keyword-based file retrieval using TF-IDF scoring.
+Replaces fastembed to stay within Render free tier (512 MB RAM).
 """
-import asyncio
+import math
+import re
 from typing import Optional
-import numpy as np
-
-# Lazy singleton — model loads only when first needed
-_model = None
 
 
-def _get_model():
-    global _model
-    if _model is None:
-        from fastembed import TextEmbedding
-        _model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
-    return _model
+def _tokenize(text: str) -> list[str]:
+    return re.findall(r"[a-zA-Z_]\w*", text.lower())
 
 
-def _embed_sync(documents: list[str]) -> np.ndarray:
-    model = _get_model()
-    return np.array(list(model.embed(documents)), dtype=np.float32)
-
-
-async def embed_files(
-    contents: dict[str, Optional[str]],
-) -> dict:
+def embed_files_sync(contents: dict[str, Optional[str]]) -> dict:
     """
-    Embed every non-empty file.
-    Returns {"embeddings": ndarray(N, D), "paths": [str, ...]}.
-    Run in a thread pool so the sync model doesn't block the event loop.
+    Build a TF-IDF index over file contents.
+    Returns {"index": {path: {term: tf-idf}}, "paths": [str]}.
     """
-    paths, documents = [], []
+    paths, docs = [], []
     for path, content in contents.items():
         if not content:
             continue
-        # Prefix with path so the model understands file context
-        documents.append(f"File: {path}\n\n{content[:2000]}")
         paths.append(path)
+        docs.append(f"{path}\n{content[:3000]}")
 
-    if not documents:
-        return {"embeddings": np.empty((0, 384), dtype=np.float32), "paths": []}
+    if not docs:
+        return {"index": {}, "paths": []}
 
+    # Term frequency per doc
+    tf: list[dict[str, float]] = []
+    for doc in docs:
+        tokens = _tokenize(doc)
+        counts: dict[str, int] = {}
+        for t in tokens:
+            counts[t] = counts.get(t, 0) + 1
+        total = max(len(tokens), 1)
+        tf.append({t: c / total for t, c in counts.items()})
+
+    # Document frequency
+    df: dict[str, int] = {}
+    for doc_tf in tf:
+        for term in doc_tf:
+            df[term] = df.get(term, 0) + 1
+
+    N = len(docs)
+    index: dict[str, dict[str, float]] = {}
+    for path, doc_tf in zip(paths, tf):
+        index[path] = {
+            term: tf_val * math.log((N + 1) / (df[term] + 1))
+            for term, tf_val in doc_tf.items()
+        }
+
+    return {"index": index, "paths": paths}
+
+
+async def embed_files(contents: dict[str, Optional[str]]) -> dict:
+    import asyncio
     loop = asyncio.get_event_loop()
-    embeddings = await loop.run_in_executor(None, _embed_sync, documents)
-    return {"embeddings": embeddings, "paths": paths}
+    return await loop.run_in_executor(None, embed_files_sync, contents)
 
 
-def retrieve(
-    query: str,
-    embedding_data: dict,
-    top_k: int = 8,
-) -> list[str]:
+def retrieve(query: str, embedding_data: dict, top_k: int = 8) -> list[str]:
     """
-    Return the top_k file paths most semantically similar to query.
-    Pure numpy — runs in microseconds.
+    Score each file by summing TF-IDF weights for query terms.
     """
-    embeddings: np.ndarray = embedding_data["embeddings"]
-    paths: list[str]       = embedding_data["paths"]
+    index: dict[str, dict[str, float]] = embedding_data.get("index", {})
+    paths: list[str] = embedding_data.get("paths", [])
 
-    if len(paths) == 0:
+    if not paths:
         return []
 
-    model = _get_model()
-    query_vec = np.array(list(model.embed([query])), dtype=np.float32)[0]
+    query_terms = set(_tokenize(query))
+    scores: dict[str, float] = {}
+    for path in paths:
+        doc_index = index.get(path, {})
+        scores[path] = sum(doc_index.get(t, 0.0) for t in query_terms)
 
-    # Cosine similarity
-    norms  = np.linalg.norm(embeddings, axis=1)
-    q_norm = np.linalg.norm(query_vec)
-    scores = (embeddings @ query_vec) / (norms * q_norm + 1e-9)
-
-    top_indices = np.argsort(scores)[::-1][:top_k]
-    return [paths[i] for i in top_indices]
+    return sorted(paths, key=lambda p: scores[p], reverse=True)[:top_k]
